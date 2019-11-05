@@ -13,7 +13,17 @@ namespace GZipTest.Compression
         private int _runningThreads = default(int);
         private static readonly object _locker = new object();
 
-        private EventWaitHandle[] _handles = new ManualResetEvent[AppConstants.MaxThreadsCount - 1];
+        //private EventWaitHandle[] _handles = new ManualResetEvent[AppConstants.MaxThreadsCount - 1];
+        private EventWaitHandle[] _handles = new ManualResetEvent[]{
+            new ManualResetEvent(true),
+            new ManualResetEvent(true),
+            new ManualResetEvent(true),
+            new ManualResetEvent(true),
+            new ManualResetEvent(true),
+            new ManualResetEvent(true),
+            new ManualResetEvent(true),
+            new ManualResetEvent(true),
+        };
 
         private int _isReadingDone = default(int);
         private int _isProcessingDone = default(int);
@@ -77,23 +87,9 @@ namespace GZipTest.Compression
             if (!outputFilePath.EndsWith(".gz"))
                 throw new ArgumentException("Неверное расширение для архива. Архив должен иметь расширение *.gz");
 
-            /* 
-            - read all chunks (single thread)
-            - process chunks one by one (multithreading)
-            - write all processed chunks (single thread)
-            */
-
             //  READING
             var readThread = new Thread(ReadData) { Name = "reading_thread" };
             readThread.Start(inputFilePath);
-
-            //  START COMPRESSING (run initial threads)
-            for (int i = 1; i < _handles.Length; i++)
-            {
-                Interlocked.Increment(ref _runningThreads);
-                _handles[i] = new ManualResetEvent(false);
-                new Thread(ProcessSlice) { Name = $"t-{i}-init" }.Start(i);
-            }
 
             //  CONTINUE COMPRESSING
             int last = default(int);
@@ -105,23 +101,19 @@ namespace GZipTest.Compression
                     continue;
                 }
 
-                if (_isReadingDone == 1 && _readSlices.Count == 0)
-                    break;
-
                 Interlocked.Exchange(ref last, WaitHandle.WaitAny(_handles));
                 Interlocked.Increment(ref _runningThreads);
                 new Thread(ProcessSlice) { Name = $"t-{last}" }.Start(last);
             }
-            while (true);
+            while (_isProcessingDone != 1);
 
             WaitHandle.WaitAll(_handles);
 
             Console.Out.WriteLine("compression has finished");
 
             //  WRITE CHUNKS
-            //var writeThread = new Thread(WriteData) { Name = "writing_thread" };
-            //writeThread.Start(outputFilePath);
-            WriteData(outputFilePath);
+            var writeThread = new Thread(WriteData) { Name = "writing_thread" };
+            writeThread.Start(outputFilePath);
 
             WaitHandle.WaitAll(_handles);
         }
@@ -149,13 +141,15 @@ namespace GZipTest.Compression
                             var trailerBucker = new byte[bytesRead];
                             Array.Copy(bucket, 0, trailerBucker, 0, bytesRead);
                             _readSlices.Enqueue(new FileChunk { Id = chunkId, Bytes = trailerBucker });
-                        }   
+                        }
                         else
                             _readSlices.Enqueue(new FileChunk { Id = chunkId, Bytes = bucket });
 
                         chunkId++;
-                        Console.Out.WriteLine($"chunk_read: {chunkId}");
+                        //Console.Out.WriteLine($"chunk_read: {chunkId}");
                     }
+
+                    bucket = new byte[bucket.Length];
                 }
 
                 Console.Out.WriteLine("file has been read");
@@ -204,7 +198,7 @@ namespace GZipTest.Compression
 
             Interlocked.Decrement(ref _runningThreads);
             
-            Console.Out.WriteLine($"thread#{triggerId} is out");
+            //Console.Out.WriteLine($"thread#{triggerId} is out");
         }
 
         private void WriteData(object obj)
@@ -225,7 +219,7 @@ namespace GZipTest.Compression
                         var chunk = _compressedSlices.Dequeue();
 
                         archivedFile.Write(chunk.Bytes, 0, chunk.Bytes.Length);
-                        Console.Out.WriteLine($"chunk_id#: {chunk.Id}");
+                        //Console.Out.WriteLine($"chunk_id#: {chunk.Id}");
                     }
 
                     archivedFile.Flush();
