@@ -13,17 +13,7 @@ namespace GZipTest.Compression
         private int _runningThreads = default(int);
         private static readonly object _locker = new object();
 
-        //private EventWaitHandle[] _handles = new ManualResetEvent[AppConstants.MaxThreadsCount - 1];
-        private EventWaitHandle[] _handles = new ManualResetEvent[]{
-            new ManualResetEvent(true),
-            new ManualResetEvent(true),
-            new ManualResetEvent(true),
-            new ManualResetEvent(true),
-            new ManualResetEvent(true),
-            new ManualResetEvent(true),
-            new ManualResetEvent(true),
-            new ManualResetEvent(true),
-        };
+        private Semaphore _sm = new Semaphore(AppConstants.MaxThreadsCount, AppConstants.MaxThreadsCount);
 
         private int _isReadingDone = default(int);
         private int _isProcessingDone = default(int);
@@ -91,6 +81,10 @@ namespace GZipTest.Compression
             var readThread = new Thread(ReadData) { Name = "reading_thread" };
             readThread.Start(inputFilePath);
 
+            //  PROCESSING
+            var processingThread = new Thread(() => { }) { Name = "proc_thread" };
+            processingThread.Start();
+
             //  CONTINUE COMPRESSING
             int last = default(int);
             do
@@ -101,28 +95,22 @@ namespace GZipTest.Compression
                     continue;
                 }
 
-                Interlocked.Exchange(ref last, WaitHandle.WaitAny(_handles));
                 Interlocked.Increment(ref _runningThreads);
-                new Thread(ProcessSlice) { Name = $"t-{last}" }.Start(last);
+                new Thread(ProcessChunk) { Name = $"t-{last}" }.Start(last);
             }
             while (_isProcessingDone != 1);
-
-            WaitHandle.WaitAll(_handles);
 
             Console.Out.WriteLine("compression has finished");
 
             //  WRITE CHUNKS
             var writeThread = new Thread(WriteData) { Name = "writing_thread" };
             writeThread.Start(outputFilePath);
-
-            WaitHandle.WaitAll(_handles);
         }
 
         private void ReadData(object obj)
         {
+            _sm.WaitOne();
             Interlocked.Increment(ref _runningThreads);
-
-            _handles[0] = new ManualResetEvent(false);
 
             int chunkId = default(int);
             string inputFilePath = obj as string;
@@ -157,21 +145,41 @@ namespace GZipTest.Compression
 
             Interlocked.Decrement(ref _runningThreads);
             Interlocked.Increment(ref _isReadingDone);
-            _handles[0].Set();
+            _sm.Release();
         }
 
-        private void ProcessSlice(object obj)
+        private void ProcessData(object obj)
+        {
+            _sm.WaitOne();
+            Interlocked.Increment(ref _runningThreads);
+
+            int last = (int)DateTime.Now.Ticks;
+            do
+            {
+                if (_runningThreads >= AppConstants.MaxThreadsCount)
+                {
+                    Thread.Sleep(10);
+                    continue;
+                }
+
+                Interlocked.Increment(ref _runningThreads);
+                new Thread(ProcessChunk) { Name = $"t-{last}" }.Start(last);
+            }
+            while (_isProcessingDone != 1);
+
+            Console.Out.WriteLine("compression has finished");
+            _sm.Release();
+            Interlocked.Decrement(ref _runningThreads);
+        }
+
+        private void ProcessChunk(object obj)
         {
             int triggerId = (int)obj;
             
             FileChunk data;
+            _sm.WaitOne();
             lock (_locker)
             {
-                if (_handles[triggerId] == null)
-                    _handles[triggerId] = new ManualResetEvent(false);
-                else
-                    _handles[triggerId].Reset();
-
                 if (_readSlices.Count != 0)
                 {
                     data = _readSlices.Dequeue();
@@ -192,11 +200,10 @@ namespace GZipTest.Compression
                     if (_isReadingDone == 1 && _isProcessingDone == 0)
                         Interlocked.Increment(ref _isProcessingDone);
                 }
-
-                _handles[triggerId].Set();
             }
 
             Interlocked.Decrement(ref _runningThreads);
+            _sm.Release();
             
             //Console.Out.WriteLine($"thread#{triggerId} is out");
         }
@@ -207,8 +214,7 @@ namespace GZipTest.Compression
 
             Interlocked.Increment(ref _runningThreads);
 
-            //  todo: get any free slot, not the first one
-            _handles[0] = new ManualResetEvent(false);
+            _sm.WaitOne();
 
             lock (_locker)
             {
@@ -229,7 +235,7 @@ namespace GZipTest.Compression
             Console.Out.WriteLine("file has been written");
 
             Interlocked.Decrement(ref _runningThreads);
-            _handles[0].Set();
+            _sm.Release();
         }
 
         public void CompressFile(string inputFilePath)
