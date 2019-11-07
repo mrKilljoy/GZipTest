@@ -12,7 +12,6 @@ namespace GZipTest.Compression
         private Queue<FileChunk> _compressedSlices = new Queue<FileChunk>();
         private int _runningThreads = default(int);
         private static readonly object _locker = new object();
-
         private Semaphore _sm = new Semaphore(AppConstants.MaxThreadsCount, AppConstants.MaxThreadsCount);
 
         private int _isReadingDone = default(int);
@@ -82,27 +81,10 @@ namespace GZipTest.Compression
             readThread.Start(inputFilePath);
 
             //  PROCESSING
-            var processingThread = new Thread(() => { }) { Name = "proc_thread" };
+            var processingThread = new Thread(ProcessData) { Name = "proc_thread" };
             processingThread.Start();
 
-            //  CONTINUE COMPRESSING
-            int last = default(int);
-            do
-            {
-                if (_runningThreads >= AppConstants.MaxThreadsCount)
-                {
-                    Thread.Sleep(10);
-                    continue;
-                }
-
-                Interlocked.Increment(ref _runningThreads);
-                new Thread(ProcessChunk) { Name = $"t-{last}" }.Start(last);
-            }
-            while (_isProcessingDone != 1);
-
-            Console.Out.WriteLine("compression has finished");
-
-            //  WRITE CHUNKS
+            //  WRITING
             var writeThread = new Thread(WriteData) { Name = "writing_thread" };
             writeThread.Start(outputFilePath);
         }
@@ -134,18 +116,15 @@ namespace GZipTest.Compression
                             _readSlices.Enqueue(new FileChunk { Id = chunkId, Bytes = bucket });
 
                         chunkId++;
-                        //Console.Out.WriteLine($"chunk_read: {chunkId}");
                     }
 
                     bucket = new byte[bucket.Length];
                 }
-
-                Console.Out.WriteLine("file has been read");
             }
 
+            _sm.Release();
             Interlocked.Decrement(ref _runningThreads);
             Interlocked.Increment(ref _isReadingDone);
-            _sm.Release();
         }
 
         private void ProcessData(object obj)
@@ -153,31 +132,28 @@ namespace GZipTest.Compression
             _sm.WaitOne();
             Interlocked.Increment(ref _runningThreads);
 
-            int last = (int)DateTime.Now.Ticks;
             do
             {
-                if (_runningThreads >= AppConstants.MaxThreadsCount)
+                if (_runningThreads >= AppConstants.MaxThreadsCount - 1)
                 {
                     Thread.Sleep(10);
                     continue;
                 }
 
                 Interlocked.Increment(ref _runningThreads);
-                new Thread(ProcessChunk) { Name = $"t-{last}" }.Start(last);
+                new Thread(ProcessChunk).Start();
             }
             while (_isProcessingDone != 1);
-
-            Console.Out.WriteLine("compression has finished");
+            
             _sm.Release();
             Interlocked.Decrement(ref _runningThreads);
         }
 
         private void ProcessChunk(object obj)
-        {
-            int triggerId = (int)obj;
-            
+        {            
             FileChunk data;
             _sm.WaitOne();
+
             lock (_locker)
             {
                 if (_readSlices.Count != 0)
@@ -187,10 +163,7 @@ namespace GZipTest.Compression
                     using (var memoryStream = new MemoryStream())
                     {
                         using (var zipper = new GZipStream(memoryStream, CompressionMode.Compress, true))
-                        {
                             zipper.Write(data.Bytes, 0, data.Bytes.Length);
-                            //Console.Out.WriteLine($"package#{data.Id} has been compressed");
-                        }
 
                         _compressedSlices.Enqueue(new FileChunk { Id = data.Id, Bytes = memoryStream.ToArray() });
                     }
@@ -198,14 +171,15 @@ namespace GZipTest.Compression
                 else
                 {
                     if (_isReadingDone == 1 && _isProcessingDone == 0)
+                    {
                         Interlocked.Increment(ref _isProcessingDone);
+                        Monitor.PulseAll(_locker);
+                    }   
                 }
             }
 
             Interlocked.Decrement(ref _runningThreads);
             _sm.Release();
-            
-            //Console.Out.WriteLine($"thread#{triggerId} is out");
         }
 
         private void WriteData(object obj)
@@ -220,19 +194,20 @@ namespace GZipTest.Compression
             {
                 using (var archivedFile = new FileStream(outputFilePath, FileMode.CreateNew))
                 {
-                    while (_compressedSlices.Count > 0)
+                    while(_compressedSlices.Count > 0 || _isProcessingDone == 0)
                     {
+                        if (_compressedSlices.Count == 0 && _isProcessingDone == 0)
+                        {
+                            Monitor.Wait(_locker, 500);
+                            continue;
+                        }   
+
                         var chunk = _compressedSlices.Dequeue();
 
                         archivedFile.Write(chunk.Bytes, 0, chunk.Bytes.Length);
-                        //Console.Out.WriteLine($"chunk_id#: {chunk.Id}");
                     }
-
-                    archivedFile.Flush();
                 }
             }
-
-            Console.Out.WriteLine("file has been written");
 
             Interlocked.Decrement(ref _runningThreads);
             _sm.Release();
