@@ -10,8 +10,8 @@ namespace GZipTest
             ICompressor cmp = new GZipCompressor();
             IDecompressor dcmp = new GZipDecompressor();
 
-            cmp.CompressFile(@"d:\temp\large_doc_sample.pdf");
-            //dcmp.DecompressFile(@"d:\temp\large_doc_sample.pdf.gz", @"d:\temp\large_doc_sample2.pdf");
+            cmp.CompressFile(@"d:\temp\large_doc_sample.pdf", @"d:\temp\large_doc_sample2.pdf.gz");
+            cmp.Dispose();
         }
     }
 }

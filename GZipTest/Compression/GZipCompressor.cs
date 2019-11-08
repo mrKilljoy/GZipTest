@@ -8,14 +8,29 @@ namespace GZipTest.Compression
 {
     public class GZipCompressor : ICompressor
     {
-        private Queue<FileChunk> _readSlices = new Queue<FileChunk>();
-        private Queue<FileChunk> _compressedSlices = new Queue<FileChunk>();
-        private int _runningThreads = default(int);
-        private static readonly object _locker = new object();
-        private Semaphore _sm = new Semaphore(AppConstants.MaxThreadsCount, AppConstants.MaxThreadsCount);
+        private Queue<FileChunk> _readChunks;
+        private Queue<FileChunk> _compressedChunks;
+
+        private int _runningThreadsNumber = default(int);
+        private readonly object _lock = new object();
+        private Semaphore _sm;
+        private ManualResetEvent[] _endingEvents;
 
         private int _isReadingDone = default(int);
         private int _isProcessingDone = default(int);
+
+        public GZipCompressor()
+        {
+            _readChunks = new Queue<FileChunk>();
+            _compressedChunks = new Queue<FileChunk>();
+
+            _sm = new Semaphore(AppConstants.MaxThreadsCount, AppConstants.MaxThreadsCount);
+            _endingEvents = new ManualResetEvent[]
+            {
+                new ManualResetEvent(false),
+                new ManualResetEvent(false)
+            };
+        }
 
         private void CompressBase(string inputFilePath, string outputFilePath)
         {
@@ -33,69 +48,28 @@ namespace GZipTest.Compression
             if (!outputFilePath.EndsWith(".gz"))
                 throw new ArgumentException("Неверное расширение для архива. Архив должен иметь расширение *.gz");
 
-            using (var originalFile = new FileStream(inputFilePath, FileMode.Open))
-            {
-                //  todo: make a way to set size of slice
-                long chunksToProcess = (originalFile.Length % (decimal)AppConstants.SliceSizeBytes == 0 ?
-                    originalFile.Length / AppConstants.SliceSizeBytes :
-                    originalFile.Length / AppConstants.SliceSizeBytes + 1);
-
-                //  todo: deal with output file format
-                using (var compressedOne = new FileStream(outputFilePath, FileMode.CreateNew))
-                {
-                    //  todo: handle size slice properly (should be some restrictions about it)
-                    using (var gs = new GZipStream(compressedOne, CompressionMode.Compress, true))
-                    {
-                        byte[] bucket = new byte[AppConstants.SliceSizeBytes];
-                        int bytesRead;
-
-                        while ((bytesRead = originalFile.Read(bucket, 0, bucket.Length)) != 0)
-                        {
-                            gs.Write(bucket, 0, bytesRead);
-                            Console.Out.WriteLine($"left: {chunksToProcess}");
-                            chunksToProcess--;
-                        }
-                    }
-                }
-            }
-        }
-
-        private void CompressParallel(string inputFilePath, string outputFilePath)
-        {
-            if (string.IsNullOrEmpty(inputFilePath))
-                throw new ArgumentException("Имя входного файла не задано");
-
-            //  todo
-            if (!File.Exists(inputFilePath))
-                throw new FileNotFoundException("Файл с таким именем не найден");
-
-            //  todo
-            if (File.Exists(outputFilePath))
-                throw new ArgumentException("Архив с таким именем уже существует");
-
-            if (!outputFilePath.EndsWith(".gz"))
-                throw new ArgumentException("Неверное расширение для архива. Архив должен иметь расширение *.gz");
-
             //  READING
-            var readThread = new Thread(ReadData) { Name = "reading_thread" };
+            var readThread = new Thread(ReadData);
             readThread.Start(inputFilePath);
 
             //  PROCESSING
-            var processingThread = new Thread(ProcessData) { Name = "proc_thread" };
+            var processingThread = new Thread(ProcessData);
             processingThread.Start();
 
             //  WRITING
-            var writeThread = new Thread(WriteData) { Name = "writing_thread" };
+            var writeThread = new Thread(WriteData);
             writeThread.Start(outputFilePath);
+
+            ManualResetEvent.WaitAll(_endingEvents);
         }
 
         private void ReadData(object obj)
         {
             _sm.WaitOne();
-            Interlocked.Increment(ref _runningThreads);
+            Interlocked.Increment(ref _runningThreadsNumber);
 
             int chunkId = default(int);
-            string inputFilePath = obj as string;
+            string inputFilePath = (string)obj;
 
             using (var originalFile = new FileStream(inputFilePath, FileMode.Open))
             {
@@ -104,16 +78,16 @@ namespace GZipTest.Compression
 
                 while ((bytesRead = originalFile.Read(bucket, 0, bucket.Length)) != 0)
                 {
-                    lock (_locker)
+                    lock (_lock)
                     {
-                        if (bytesRead != AppConstants.SliceSizeBytes)
+                        if (bytesRead == AppConstants.SliceSizeBytes)
+                            _readChunks.Enqueue(new FileChunk { Id = chunkId, Bytes = bucket });
+                        else
                         {
                             var trailerBucker = new byte[bytesRead];
                             Array.Copy(bucket, 0, trailerBucker, 0, bytesRead);
-                            _readSlices.Enqueue(new FileChunk { Id = chunkId, Bytes = trailerBucker });
+                            _readChunks.Enqueue(new FileChunk { Id = chunkId, Bytes = trailerBucker });
                         }
-                        else
-                            _readSlices.Enqueue(new FileChunk { Id = chunkId, Bytes = bucket });
 
                         chunkId++;
                     }
@@ -123,49 +97,53 @@ namespace GZipTest.Compression
             }
 
             _sm.Release();
-            Interlocked.Decrement(ref _runningThreads);
+            Interlocked.Decrement(ref _runningThreadsNumber);
             Interlocked.Increment(ref _isReadingDone);
         }
 
         private void ProcessData(object obj)
         {
             _sm.WaitOne();
-            Interlocked.Increment(ref _runningThreads);
+            Interlocked.Increment(ref _runningThreadsNumber);
 
             do
             {
-                if (_runningThreads >= AppConstants.MaxThreadsCount - 1)
+                if (_runningThreadsNumber >= AppConstants.MaxThreadsCount - 1)
                 {
                     Thread.Sleep(10);
                     continue;
                 }
 
-                Interlocked.Increment(ref _runningThreads);
+                Interlocked.Increment(ref _runningThreadsNumber);
                 new Thread(ProcessChunk).Start();
             }
             while (_isProcessingDone != 1);
             
             _sm.Release();
-            Interlocked.Decrement(ref _runningThreads);
+
+            lock (_lock)
+                _endingEvents[0].Set();
+
+            Interlocked.Decrement(ref _runningThreadsNumber);
         }
 
         private void ProcessChunk(object obj)
         {            
-            FileChunk data;
+            FileChunk chunk;
             _sm.WaitOne();
 
-            lock (_locker)
+            lock (_lock)
             {
-                if (_readSlices.Count != 0)
+                if (_readChunks.Count != 0)
                 {
-                    data = _readSlices.Dequeue();
+                    chunk = _readChunks.Dequeue();
 
                     using (var memoryStream = new MemoryStream())
                     {
                         using (var zipper = new GZipStream(memoryStream, CompressionMode.Compress, true))
-                            zipper.Write(data.Bytes, 0, data.Bytes.Length);
+                            zipper.Write(chunk.Bytes, 0, chunk.Bytes.Length);
 
-                        _compressedSlices.Enqueue(new FileChunk { Id = data.Id, Bytes = memoryStream.ToArray() });
+                        _compressedChunks.Enqueue(new FileChunk { Id = chunk.Id, Bytes = memoryStream.ToArray() });
                     }
                 }
                 else
@@ -173,55 +151,63 @@ namespace GZipTest.Compression
                     if (_isReadingDone == 1 && _isProcessingDone == 0)
                     {
                         Interlocked.Increment(ref _isProcessingDone);
-                        Monitor.PulseAll(_locker);
+                        Monitor.PulseAll(_lock);
                     }   
                 }
             }
 
-            Interlocked.Decrement(ref _runningThreads);
+            Interlocked.Decrement(ref _runningThreadsNumber);
             _sm.Release();
         }
 
         private void WriteData(object obj)
         {
-            string outputFilePath = obj as string;
-
-            Interlocked.Increment(ref _runningThreads);
+            string outputFilePath = (string)obj;
 
             _sm.WaitOne();
+            Interlocked.Increment(ref _runningThreadsNumber);
 
-            lock (_locker)
+            lock (_lock)
             {
-                using (var archivedFile = new FileStream(outputFilePath, FileMode.CreateNew))
+                using (var compressedFile = new FileStream(outputFilePath, FileMode.CreateNew))
                 {
-                    while(_compressedSlices.Count > 0 || _isProcessingDone == 0)
+                    while (_compressedChunks.Count > 0 || _isProcessingDone == 0)
                     {
-                        if (_compressedSlices.Count == 0 && _isProcessingDone == 0)
+                        if (_compressedChunks.Count == 0 && _isProcessingDone == 0)
                         {
-                            Monitor.Wait(_locker, 500);
+                            Monitor.Wait(_lock, 500);
                             continue;
-                        }   
+                        }
 
-                        var chunk = _compressedSlices.Dequeue();
+                        var chunk = _compressedChunks.Dequeue();
 
-                        archivedFile.Write(chunk.Bytes, 0, chunk.Bytes.Length);
+                        compressedFile.Write(chunk.Bytes, 0, chunk.Bytes.Length);
                     }
                 }
             }
 
-            Interlocked.Decrement(ref _runningThreads);
             _sm.Release();
+            Interlocked.Decrement(ref _runningThreadsNumber);
+
+            lock (_lock)
+                _endingEvents[1].Set();
         }
 
         public void CompressFile(string inputFilePath)
         {
             //CompressBase(inputFilePath, string.Concat(inputFilePath, AppConstants.GZipArchiveExtension));
-            CompressParallel(inputFilePath, string.Concat(inputFilePath, AppConstants.GZipArchiveExtension));
+            CompressBase(inputFilePath, string.Concat(inputFilePath, AppConstants.GZipArchiveExtension));
         }
 
         public void CompressFile(string inputFilePath, string outputFilePath)
         {
             CompressBase(inputFilePath, outputFilePath);
+        }
+
+        public void Dispose()
+        {
+            _sm.Close();
+            _sm = null;
         }
     }
 }

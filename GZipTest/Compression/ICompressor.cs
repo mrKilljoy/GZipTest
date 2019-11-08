@@ -1,6 +1,8 @@
-﻿namespace GZipTest.Compression
+﻿using System;
+
+namespace GZipTest.Compression
 {
-    public interface ICompressor
+    public interface ICompressor : IDisposable
     {
         void CompressFile(string inputFilePath);
 
