@@ -1,3 +1,4 @@
+﻿using System;
 using GZipTest.Compression;
 using GZipTest.Decompression;
 
@@ -7,11 +8,58 @@ namespace GZipTest
     {
         static void Main(string[] args)
         {
-            ICompressor cmp = new GZipCompressor();
-            IDecompressor dcmp = new GZipDecompressor();
+            string input = @"d:\temp\compression\large_vid_sample.mkv";
+            string output = @"d:\temp\compression\large_vid_sample_0.mkv.gz";
+            var appDomain = AppDomain.CurrentDomain;
+            appDomain.UnhandledException += ProcessUnhandledException;
+            Console.CancelKeyPress += CancelProcess;
 
-            cmp.CompressFile(@"d:\temp\large_doc_sample.pdf", @"d:\temp\large_doc_sample2.pdf.gz");
+            ICompressor cmp = new GZipCompressor();
+            var result = cmp.CompressFile(input, output);
             cmp.Dispose();
+
+            //GZipDecompressor dcmp = new GZipDecompressor();
+            //var result = dcmp.HandleFile(output);
+            //dcmp.Dispose();
+
+            //new CompressorTwo().Decompress(input + ".gz");
+
+            //HandleOperationResult(result);
+        }
+
+        /// <summary>
+        /// Обработать полученный ответ.
+        /// </summary>
+        /// <param name="result">Данные о результате операции.</param>
+        private static void HandleOperationResult(OperationResult result)
+        {
+            if (result.Result == OperationResultEnum.Success)
+                Console.WriteLine((int)OperationResultEnum.Success);
+            else
+            {
+                Console.WriteLine($"Ошибка: {result.ThrownException.Message}");
+                Console.WriteLine((int)OperationResultEnum.Failure);
+            }
+        }
+
+        /// <summary>
+        /// Сообщить о непредвиденной ошибке.
+        /// </summary>
+        private static void ProcessUnhandledException(object sender, UnhandledExceptionEventArgs e)
+        {
+            Console.WriteLine("Непредвиденная ошибка");
+            Console.Write(((Exception)e.ExceptionObject).Message);
+            Console.Write((int)OperationResultEnum.Failure);
+        }
+
+        /// <summary>
+        /// Сообщить об отмене операции.
+        /// </summary>
+        private static void CancelProcess(object sender, ConsoleCancelEventArgs e)
+        {
+            Console.WriteLine("Операция отменена");
+            Console.Write((int)OperationResultEnum.Failure);
+            Environment.Exit(1);
         }
     }
 }

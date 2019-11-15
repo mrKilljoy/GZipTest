@@ -4,8 +4,8 @@ namespace GZipTest.Compression
 {
     public interface ICompressor : IDisposable
     {
-        void CompressFile(string inputFilePath);
+        OperationResult CompressFile(string inputFilePath);
 
-        void CompressFile(string inputFilePath, string outputFilePath);
+        OperationResult CompressFile(string inputFilePath, string outputFilePath);
     }
 }

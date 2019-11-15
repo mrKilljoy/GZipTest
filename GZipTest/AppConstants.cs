@@ -2,9 +2,9 @@
 
 namespace GZipTest
 {
-    public static class AppConstants
+    internal static class AppConstants
     {
-        public const int SliceSizeBytes = 1048576;
+        public const int ChunkSizeBytes = 1048576;
 
         public const string GZipArchiveExtension = ".gz";
 

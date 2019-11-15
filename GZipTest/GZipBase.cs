@@ -2,27 +2,28 @@
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
+using System.Linq;
 using System.Threading;
 
-namespace GZipTest.Compression
+namespace GZipTest
 {
-    public class GZipCompressor : ICompressor
+    public abstract class GZipBase
     {
-        private readonly Queue<FileChunk> _readChunks;
-        private readonly Queue<FileChunk> _compressedChunks;
-        
-        private readonly object _lock = new object();
-        private readonly ManualResetEvent[] _endingEvents;
-        private Semaphore _sm;
-        private int _runningThreadsNumber = default(int);
+        protected readonly Queue<FileChunk> _readChunks;
+        protected readonly Queue<FileChunk> _processedChunks;
 
-        private int _isReadingDone = default(int);
-        private int _isProcessingDone = default(int);
+        protected readonly object _lock = new object();
+        protected readonly ManualResetEvent[] _endingEvents;
+        protected Semaphore _sm;
+        protected int _runningThreadsNumber = default(int);
 
-        public GZipCompressor()
+        protected int _isReadingDone = default(int);
+        protected int _isProcessingDone = default(int);
+
+        protected GZipBase()
         {
             _readChunks = new Queue<FileChunk>();
-            _compressedChunks = new Queue<FileChunk>();
+            _processedChunks = new Queue<FileChunk>();
 
             _sm = new Semaphore(AppConstants.MaxThreadsCount, AppConstants.MaxThreadsCount);
             _endingEvents = new ManualResetEvent[]
@@ -32,21 +33,11 @@ namespace GZipTest.Compression
             };
         }
 
-        private OperationResult CompressBase(string inputFilePath, string outputFilePath)
+        protected OperationResult HandleBase(string inputFilePath, string outputFilePath)
         {
             try
             {
-                if (string.IsNullOrEmpty(inputFilePath))
-                    throw new ArgumentException("Имя входного файла не задано");
-
-                if (!File.Exists(inputFilePath))
-                    throw new FileNotFoundException("Файл с таким именем не найден");
-
-                if (File.Exists(outputFilePath))
-                    throw new ArgumentException("Архив с таким именем уже существует");
-
-                if (!outputFilePath.EndsWith(".gz"))
-                    throw new ArgumentException("Неверное расширение для архива. Архив должен иметь расширение *.gz");
+                ValidateArguments(inputFilePath, outputFilePath);
 
                 //  READING
                 var readThread = new Thread(ReadData);
@@ -69,7 +60,7 @@ namespace GZipTest.Compression
             }
             catch (Exception ex)
             {
-                return new OperationResult
+                return new OperationResult()
                 {
                     ThrownException = ex,
                     Result = OperationResultEnum.Failure
@@ -77,16 +68,16 @@ namespace GZipTest.Compression
             }
         }
 
-        private void ReadData(object obj)
+        protected virtual void ReadData(object obj)
         {
+            Interlocked.Increment(ref _runningThreadsNumber);
+            _sm.WaitOne();
+
+            int chunkId = default(int);
+            string inputFilePath = (string)obj;
+
             try
             {
-                //_sm.WaitOne();
-                //Interlocked.Increment(ref _runningThreadsNumber);
-
-                int chunkId = default(int);
-                string inputFilePath = (string)obj;
-
                 using (var originalFile = new FileStream(inputFilePath, FileMode.Open))
                 {
                     byte[] bucket = new byte[AppConstants.ChunkSizeBytes];
@@ -100,36 +91,35 @@ namespace GZipTest.Compression
                                 _readChunks.Enqueue(new FileChunk { Id = chunkId, Bytes = bucket });
                             else
                             {
-                                var trailerBucker = new byte[bytesRead];
-                                Array.Copy(bucket, 0, trailerBucker, 0, bytesRead);
-                                _readChunks.Enqueue(new FileChunk { Id = chunkId, Bytes = trailerBucker });
+                                var trailerBucket = new byte[bytesRead];
+                                Array.Copy(bucket, 0, trailerBucket, 0, bytesRead);
+                                _readChunks.Enqueue(new FileChunk { Id = chunkId, Bytes = trailerBucket });
                             }
 
                             chunkId++;
-                            Console.WriteLine(chunkId);
                         }
 
                         bucket = new byte[bucket.Length];
                     }
                 }
 
-                //_sm.Release();
-                //Interlocked.Decrement(ref _runningThreadsNumber);
-
-                Interlocked.Increment(ref _isReadingDone);
+                _sm.Release();
+                Interlocked.Decrement(ref _runningThreadsNumber);
             }
             catch (Exception ex)
             {
                 LogAndExit("Ошибка в ходе чтения файла", ex);
             }
+            
+            Interlocked.Increment(ref _isReadingDone);
         }
 
-        private void ProcessData(object obj)
+        protected void ProcessData(object obj)
         {
             try
             {
-                //_sm.WaitOne();
                 //Interlocked.Increment(ref _runningThreadsNumber);
+                //_sm.WaitOne();
 
                 do
                 {
@@ -152,10 +142,10 @@ namespace GZipTest.Compression
             catch (Exception ex)
             {
                 LogAndExit("Ошибка в ходе сжатия данных", ex);
-            }
+            }            
         }
 
-        private void ProcessChunk(object obj)
+        protected virtual void ProcessChunk(object obj)
         {
             try
             {
@@ -169,15 +159,12 @@ namespace GZipTest.Compression
                     {
                         chunk = _readChunks.Dequeue();
 
-                        using (var sourceStream = new MemoryStream(chunk.Bytes))
+                        using (var memoryStream = new MemoryStream())
                         {
-                            using (var compressedStream = new MemoryStream())
-                            {
-                                using (var zipper = new GZipStream(compressedStream, CompressionMode.Compress, true))
-                                    sourceStream.CopyTo(zipper);
+                            using (var zipper = new GZipStream(memoryStream, CompressionMode.Compress, true))
+                                zipper.Write(chunk.Bytes, 0, chunk.Bytes.Length);
 
-                                _compressedChunks.Enqueue(new FileChunk { Id = chunk.Id, Bytes = compressedStream.ToArray() });
-                            }
+                            _processedChunks.Enqueue(new FileChunk { Id = chunk.Id, Bytes = memoryStream.ToArray() });
                         }
                     }
                     else
@@ -199,28 +186,29 @@ namespace GZipTest.Compression
             }
         }
 
-        private void WriteData(object obj)
+        protected void WriteData(object obj)
         {
             string outputFilePath = (string)obj;
 
             try
             {
-                //_sm.WaitOne();
                 //Interlocked.Increment(ref _runningThreadsNumber);
+                //_sm.WaitOne();
 
                 lock (_lock)
                 {
                     using (var compressedFile = new FileStream(outputFilePath, FileMode.CreateNew))
                     {
-                        while (_compressedChunks.Count > 0 || _isProcessingDone == 0)
+                        while (_processedChunks.Count > 0 || _isProcessingDone == 0)
                         {
-                            if (_compressedChunks.Count == 0 && _isProcessingDone == 0)
+                            if (_processedChunks.Count == 0 && _isProcessingDone == 0)
                             {
                                 Monitor.Wait(_lock, 500);
                                 continue;
                             }
-                            
-                            var chunk = _compressedChunks.Dequeue();
+
+                            var chunk = _processedChunks.Dequeue();
+
                             compressedFile.Write(chunk.Bytes, 0, chunk.Bytes.Length);
                         }
                     }
@@ -238,18 +226,11 @@ namespace GZipTest.Compression
             }
         }
 
-        public OperationResult CompressFile(string inputFilePath)
-        {
-            return CompressBase(inputFilePath, string.Concat(inputFilePath, AppConstants.GZipArchiveExtension));
-        }
+        public abstract OperationResult HandleFile(string inputFilePath);
 
-        public OperationResult CompressFile(string inputFilePath, string outputFilePath)
-        {
-            return CompressBase(inputFilePath, outputFilePath);
-        }
+        public abstract OperationResult HandleFile(string inputFilePath, string outputFilePath);
 
-        //  todo: turn it on
-        private void LogAndExit(string message, Exception exception)
+        protected void LogAndExit(string message, Exception exception)
         {
             Console.WriteLine(message);
             Console.WriteLine($"Текст ошибки: {exception.Message}");
@@ -258,13 +239,15 @@ namespace GZipTest.Compression
         }
 
         //  todo: drop later
-        //private void ShowChunkData(FileChunk chunk)
+        //protected void ShowChunkData(FileChunk chunk)
         //{
         //    var header = string.Join(".", chunk.Bytes.Take(4));
         //    var trailer = string.Join(".", chunk.Bytes.Reverse().Take(14).Reverse());
         //    var trailerSize = BitConverter.ToInt32(chunk.Bytes.Reverse().Take(4).Reverse().ToArray(), 0);
-        //    Console.WriteLine($"c.id = {chunk.Id} | c.header = {header} | c.size = {trailerSize} | c.tail = {trailer}");
+        //    Console.WriteLine($"c.id = {chunk.Id}   |   c.header = {header}    |    c.size = {trailerSize} | c.tail = {trailer}");
         //}
+
+        protected abstract void ValidateArguments(string inputFilePath, string outputFilePath);
 
         public void Dispose()
         {
