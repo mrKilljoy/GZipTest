@@ -33,10 +33,20 @@ namespace GZipTest.Decompression
 
                     archivedFile.Seek(0, SeekOrigin.Begin);
 
-                    var positions = GetFlagsPositions(archivedFile);
-                    positions.Dequeue();    // drop the first one
+                    byte[] bucket;
 
-                    byte[] bucket = new byte[positions.Dequeue() - archivedFile.Position];
+                    var positions = GetFlagsPositions(archivedFile);
+                    if (positions.Count > 0)
+                        positions.Dequeue();
+
+                    if (positions.Count > 1)
+                    {
+                        positions.Dequeue();    // drop the first one
+                        bucket = new byte[positions.Dequeue() - archivedFile.Position];
+                    }
+                    else
+                        bucket = new byte[AppConstants.ChunkSizeBytes];
+                    
                     int bytesRead;
 
                     while ((bytesRead = archivedFile.Read(bucket, 0, bucket.Length)) != 0)
