@@ -2,8 +2,8 @@
 {
     public interface IDecompressor
     {
-        void DecompressFile(string inputFilePath);
+        OperationResult DecompressFile(string inputFilePath);
 
-        void DecompressFile(string inputFilePath, string outputFilePath);
+        OperationResult DecompressFile(string inputFilePath, string outputFilePath);
     }
 }

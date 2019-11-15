@@ -8,19 +8,19 @@ namespace GZipTest
     {
         static void Main(string[] args)
         {
-            string input = @"d:\temp\compression\large_vid_sample.mkv";
-            string output = @"d:\temp\compression\large_vid_sample_0.mkv.gz";
+            string input = @"d:\temp\compression\exec_sample.exe";
+            string output = @"d:\temp\compression\exec_sample_0.exe.gz";
             var appDomain = AppDomain.CurrentDomain;
             appDomain.UnhandledException += ProcessUnhandledException;
             Console.CancelKeyPress += CancelProcess;
 
-            ICompressor cmp = new GZipCompressor();
-            var result = cmp.CompressFile(input, output);
-            cmp.Dispose();
+            //ICompressor cmp = new GZipCompressor();
+            //var result = cmp.CompressFile(input, output);
+            //cmp.Dispose();
 
-            //GZipDecompressor dcmp = new GZipDecompressor();
-            //var result = dcmp.HandleFile(output);
-            //dcmp.Dispose();
+            GZipDecompressor dcmp = new GZipDecompressor();
+            var result = dcmp.DecompressFile(output);
+            dcmp.Dispose();
 
             //new CompressorTwo().Decompress(input + ".gz");
 

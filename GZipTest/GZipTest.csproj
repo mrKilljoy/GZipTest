@@ -48,7 +48,7 @@
     <Compile Include="AppConstants.cs" />
     <Compile Include="Decompression\GZipDecompressor.cs" />
     <Compile Include="Decompression\IDecompressor.cs" />
-    <Compile Include="GZipBase.cs" />
+    <Compile Include="GZipCore.cs" />
     <Compile Include="OperationResult.cs" />
     <Compile Include="FileChunk.cs" />
     <Compile Include="Program.cs" />

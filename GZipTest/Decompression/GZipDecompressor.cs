@@ -6,8 +6,10 @@ using System.Threading;
 
 namespace GZipTest.Decompression
 {
-    public class GZipDecompressor : GZipBase
+    public sealed class GZipDecompressor : GZipCore, IDecompressor
     {
+        public GZipDecompressor() : base() { }
+
         protected override void ValidateArguments(string inputFilePath, string outputFilePath)
         {
             if (!File.Exists(inputFilePath))
@@ -118,6 +120,11 @@ namespace GZipTest.Decompression
             }
         }
 
+        /// <summary>
+        /// Получить список индексов в потоке, с которых начинается заголовок gzip-фрагмента.
+        /// </summary>
+        /// <param name="stream">Читаемый поток данных.</param>
+        /// <returns>Список индексов.</returns>
         private Queue<long> GetFlagsPositions(Stream stream)
         {
             var places = new Queue<long>();
@@ -162,12 +169,12 @@ namespace GZipTest.Decompression
             return places;
         }
 
-        public override OperationResult HandleFile(string inputFilePath)
+        public OperationResult DecompressFile(string inputFilePath)
         {
             return HandleBase(inputFilePath, inputFilePath?.Replace(AppConstants.GZipArchiveExtension, string.Empty));
         }
 
-        public override OperationResult HandleFile(string inputFilePath, string outputFilePath)
+        public OperationResult DecompressFile(string inputFilePath, string outputFilePath)
         {
             return HandleBase(inputFilePath, outputFilePath);
         }
