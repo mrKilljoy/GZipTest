@@ -13,9 +13,6 @@ namespace GZipTest.Compression
         {
             try
             {
-                //_sm.WaitOne();
-                //Interlocked.Increment(ref _runningThreadsNumber);
-
                 int chunkId = default(int);
                 string inputFilePath = (string)obj;
 
@@ -43,16 +40,13 @@ namespace GZipTest.Compression
                         bucket = new byte[bucket.Length];
                     }
                 }
-
-                //_sm.Release();
-                //Interlocked.Decrement(ref _runningThreadsNumber);
-
-                Interlocked.Increment(ref _isReadingDone);
             }
             catch (Exception ex)
             {
                 LogAndExit("Ошибка в ходе чтения файла", ex);
             }
+
+            Interlocked.Increment(ref _isReadingDone);
         }
 
         protected override void ProcessChunk(object obj)
@@ -101,12 +95,12 @@ namespace GZipTest.Compression
 
         public OperationResult CompressFile(string inputFilePath)
         {
-            return HandleBase(inputFilePath, string.Concat(inputFilePath, AppConstants.GZipArchiveExtension));
+            return Handle(inputFilePath, string.Concat(inputFilePath, AppConstants.GZipArchiveExtension));
         }
 
         public OperationResult CompressFile(string inputFilePath, string outputFilePath)
         {
-            return HandleBase(inputFilePath, outputFilePath);
+            return Handle(inputFilePath, outputFilePath);
         }
 
         protected override void ValidateArguments(string inputFilePath, string outputFilePath)

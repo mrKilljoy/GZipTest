@@ -34,7 +34,7 @@ namespace GZipTest
             };
         }
 
-        protected OperationResult HandleBase(string inputFilePath, string outputFilePath)
+        protected OperationResult Handle(string inputFilePath, string outputFilePath)
         {
             try
             {
@@ -72,9 +72,6 @@ namespace GZipTest
         {
             try
             {
-                //Interlocked.Increment(ref _runningThreadsNumber);
-                //_sm.WaitOne();
-
                 do
                 {
                     if (_runningThreadsNumber >= AppConstants.MaxThreadsCount)
@@ -87,15 +84,12 @@ namespace GZipTest
                 }
                 while (_isProcessingDone != 1);
 
-                //_sm.Release();
-                //Interlocked.Decrement(ref _runningThreadsNumber);
-
                 lock (_lock)
                     _endingEvents[0].Set();
             }
             catch (Exception ex)
             {
-                LogAndExit("Ошибка в ходе сжатия данных", ex);
+                LogAndExit("Ошибка в ходе обработки данных", ex);
             }            
         }
 
@@ -107,8 +101,6 @@ namespace GZipTest
 
             try
             {
-                //Interlocked.Increment(ref _runningThreadsNumber);
-                //_sm.WaitOne();
 
                 lock (_lock)
                 {
@@ -129,15 +121,12 @@ namespace GZipTest
                     }
                 }
 
-                //_sm.Release();
-                //Interlocked.Decrement(ref _runningThreadsNumber);
-
                 lock (_lock)
                     _endingEvents[1].Set();
             }
             catch (Exception ex)
             {
-                LogAndExit("Ошибка при записи архива", ex);
+                LogAndExit("Ошибка при записи файла", ex);
             }
         }
 
@@ -146,17 +135,8 @@ namespace GZipTest
             Console.WriteLine(message);
             Console.WriteLine($"Текст ошибки: {exception.Message}");
             Console.WriteLine((int)OperationResultEnum.Failure);
-            Environment.Exit(1);
+            Environment.Exit(0);
         }
-
-        //  todo: drop later
-        //protected void ShowChunkData(FileChunk chunk)
-        //{
-        //    var header = string.Join(".", chunk.Bytes.Take(4));
-        //    var trailer = string.Join(".", chunk.Bytes.Reverse().Take(14).Reverse());
-        //    var trailerSize = BitConverter.ToInt32(chunk.Bytes.Reverse().Take(4).Reverse().ToArray(), 0);
-        //    Console.WriteLine($"c.id = {chunk.Id}   |   c.header = {header}    |    c.size = {trailerSize} | c.tail = {trailer}");
-        //}
 
         protected abstract void ValidateArguments(string inputFilePath, string outputFilePath);
 

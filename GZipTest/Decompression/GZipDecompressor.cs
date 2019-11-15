@@ -21,9 +21,6 @@ namespace GZipTest.Decompression
 
         protected override void ReadData(object obj)
         {
-            //Interlocked.Increment(ref _runningThreadsNumber);
-            //_sm.WaitOne();
-
             int chunkId = default(int);
             string inputFilePath = (string)obj;
 
@@ -64,9 +61,6 @@ namespace GZipTest.Decompression
                             bucket = new byte[archivedFile.Length - archivedFile.Position];
                     }
                 }
-
-                //_sm.Release();
-                //Interlocked.Decrement(ref _runningThreadsNumber);
             }
             catch (Exception ex)
             {
@@ -171,12 +165,12 @@ namespace GZipTest.Decompression
 
         public OperationResult DecompressFile(string inputFilePath)
         {
-            return HandleBase(inputFilePath, inputFilePath?.Replace(AppConstants.GZipArchiveExtension, string.Empty));
+            return Handle(inputFilePath, inputFilePath?.Replace(AppConstants.GZipArchiveExtension, string.Empty));
         }
 
         public OperationResult DecompressFile(string inputFilePath, string outputFilePath)
         {
-            return HandleBase(inputFilePath, outputFilePath);
+            return Handle(inputFilePath, outputFilePath);
         }
     }
 }

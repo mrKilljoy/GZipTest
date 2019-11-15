@@ -8,23 +8,59 @@ namespace GZipTest
     {
         static void Main(string[] args)
         {
-            string input = @"d:\temp\compression\exec_sample.exe";
-            string output = @"d:\temp\compression\exec_sample_0.exe.gz";
+            //  set handlers
             var appDomain = AppDomain.CurrentDomain;
             appDomain.UnhandledException += ProcessUnhandledException;
             Console.CancelKeyPress += CancelProcess;
 
-            //ICompressor cmp = new GZipCompressor();
-            //var result = cmp.CompressFile(input, output);
-            //cmp.Dispose();
+            ValidateInputArguments(args);
 
-            GZipDecompressor dcmp = new GZipDecompressor();
-            var result = dcmp.DecompressFile(output);
-            dcmp.Dispose();
+            OperationResult result;
 
-            //new CompressorTwo().Decompress(input + ".gz");
+            switch (args[0])
+            {
+                case "compress":
+                    {
+                        string input = args[1];
+                        string output = args.Length == 3 ? args[2] : null;
 
-            //HandleOperationResult(result);
+                        ICompressor tool = new GZipCompressor();
+
+                        if (string.IsNullOrEmpty(output))
+                            result = tool.CompressFile(input);
+                        else
+                            result = tool.CompressFile(input, output);
+
+                        tool.Dispose();
+
+                        break;
+                    }
+
+                case "decompress":
+                    {
+                        string input = args[1];
+                        string output = args.Length == 3 ? args[2] : null;
+
+                        IDecompressor tool = new GZipDecompressor();
+
+                        if (string.IsNullOrEmpty(output))
+                            result = tool.DecompressFile(input);
+                        else
+                            result = tool.DecompressFile(input, output);
+
+                        tool.Dispose();
+
+                        break;
+                    }
+
+                default:
+                    {
+                        Console.WriteLine("Нет такой команды");
+                        return;
+                    }
+            }
+
+            HandleOperationResult(result);
         }
 
         /// <summary>
@@ -60,6 +96,25 @@ namespace GZipTest
             Console.WriteLine("Операция отменена");
             Console.Write((int)OperationResultEnum.Failure);
             Environment.Exit(1);
+        }
+
+        /// <summary>
+        /// Выполнить начальную проверку переданных параметров.
+        /// </summary>
+        /// <param name="args">Список параметров.</param>
+        private static void ValidateInputArguments(string[] args)
+        {
+            if (args == null || args.Length == 0)
+            {
+                Console.WriteLine("Нет входных аргументов");
+                Environment.Exit(0);
+            }
+            
+            if (args.Length < 2)
+            {
+                Console.WriteLine("Не указаны необходимые входные параметры: команда, входной файл");
+                Environment.Exit(0);
+            }
         }
     }
 }

@@ -1,6 +1,8 @@
-﻿namespace GZipTest.Decompression
+﻿using System;
+
+namespace GZipTest.Decompression
 {
-    public interface IDecompressor
+    public interface IDecompressor : IDisposable
     {
         OperationResult DecompressFile(string inputFilePath);
 
