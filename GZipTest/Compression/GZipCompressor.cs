@@ -29,9 +29,9 @@ namespace GZipTest.Compression
                                 _readChunks.Enqueue(new FileChunk { Id = chunkId, Bytes = bucket });
                             else
                             {
-                                var trailerBucker = new byte[bytesRead];
-                                Array.Copy(bucket, 0, trailerBucker, 0, bytesRead);
-                                _readChunks.Enqueue(new FileChunk { Id = chunkId, Bytes = trailerBucker });
+                                var trailerBucket = new byte[bytesRead];
+                                Array.Copy(bucket, 0, trailerBucket, 0, bytesRead);
+                                _readChunks.Enqueue(new FileChunk { Id = chunkId, Bytes = trailerBucket });
                             }
 
                             chunkId++;
