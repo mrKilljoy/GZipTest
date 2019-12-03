@@ -46,7 +46,7 @@ namespace GZipTest.Compression
                 LogAndExit("Ошибка в ходе чтения файла", ex);
             }
 
-            Interlocked.Increment(ref _isReadingDone);
+            Interlocked.Exchange(ref _isReadingDone, 1);
         }
 
         protected override void ProcessChunk(object obj)
@@ -69,17 +69,9 @@ namespace GZipTest.Compression
                             {
                                 using (var zipper = new GZipStream(compressedStream, CompressionMode.Compress, true))
                                     sourceStream.CopyTo(zipper);
-
+                                
                                 _processedChunks.Enqueue(new FileChunk { Id = chunk.Id, Bytes = compressedStream.ToArray() });
                             }
-                        }
-                    }
-                    else
-                    {
-                        if (_isReadingDone == 1 && _isProcessingDone == 0)
-                        {
-                            Interlocked.Increment(ref _isProcessingDone);
-                            Monitor.PulseAll(_lock);
                         }
                     }
                 }

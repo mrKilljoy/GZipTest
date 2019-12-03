@@ -16,10 +16,10 @@ namespace GZipTest
         protected readonly object _lock = new object();
         protected readonly ManualResetEvent[] _endingEvents;
         protected Semaphore _sm;
-        protected int _runningThreadsNumber = default(int);
+        protected volatile int _runningThreadsNumber = default(int);
 
-        protected int _isReadingDone = default(int);
-        protected int _isProcessingDone = default(int);
+        protected volatile int _isReadingDone = default(int);
+        protected volatile int _isProcessingDone = default(int);
 
         protected GZipCore()
         {
@@ -74,10 +74,21 @@ namespace GZipTest
             {
                 do
                 {
-                    if (_runningThreadsNumber >= AppConstants.MaxThreadsCount)
+                    lock (_lock)
                     {
-                        Thread.Sleep(10);
-                        continue;
+                        if (_readChunks.Count == 0 && _isReadingDone == 1)
+                        {
+                            Interlocked.Exchange(ref _isProcessingDone, 1);
+                            Monitor.PulseAll(_lock);
+                            break;
+                        }
+
+                        if (_runningThreadsNumber >= AppConstants.MaxThreadsCount)
+                        {
+                            Monitor.PulseAll(_lock);
+                            Monitor.Wait(_lock, 50);
+                            continue;
+                        }
                     }
                     
                     new Thread(ProcessChunk).Start();
@@ -101,7 +112,6 @@ namespace GZipTest
 
             try
             {
-
                 lock (_lock)
                 {
                     using (var compressedFile = new FileStream(outputFilePath, FileMode.CreateNew))
@@ -110,12 +120,12 @@ namespace GZipTest
                         {
                             if (_processedChunks.Count == 0 && _isProcessingDone == 0)
                             {
-                                Monitor.Wait(_lock, 500);
+                                Monitor.PulseAll(_lock);
+                                Monitor.Wait(_lock, 200);
                                 continue;
                             }
 
                             var chunk = _processedChunks.Dequeue();
-
                             compressedFile.Write(chunk.Bytes, 0, chunk.Bytes.Length);
                         }
                     }

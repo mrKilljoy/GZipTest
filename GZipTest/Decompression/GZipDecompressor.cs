@@ -35,7 +35,7 @@ namespace GZipTest.Decompression
 
                     byte[] bucket;
 
-                    var positions = GetFlagsPositions(archivedFile);
+                    var positions = GetHeadersOffsets(archivedFile);
                     if (positions.Count > 0)
                         positions.Dequeue();    // drop the first one
 
@@ -74,7 +74,7 @@ namespace GZipTest.Decompression
                 LogAndExit("Ошибка в ходе чтения архива", ex);
             }
             
-            Interlocked.Increment(ref _isReadingDone);
+            Interlocked.Exchange(ref _isReadingDone, 1);
         }
 
         protected override void ProcessChunk(object obj)
@@ -102,14 +102,6 @@ namespace GZipTest.Decompression
                             _processedChunks.Enqueue(new FileChunk { Id = chunk.Id, Bytes = decompressedMemoryStream.ToArray() });
                         }
                     }
-                    else
-                    {
-                        if (_isReadingDone == 1 && _isProcessingDone == 0)
-                        {
-                            Interlocked.Increment(ref _isProcessingDone);
-                            Monitor.PulseAll(_lock);
-                        }
-                    }
                 }
 
                 Interlocked.Decrement(ref _runningThreadsNumber);
@@ -126,48 +118,97 @@ namespace GZipTest.Decompression
         /// </summary>
         /// <param name="stream">Читаемый поток данных.</param>
         /// <returns>Список индексов.</returns>
-        private Queue<long> GetFlagsPositions(Stream stream)
+        private Queue<long> GetHeadersOffsets(Stream stream)
         {
-            var places = new Queue<long>();
+            var indices = new Queue<long>();
             int lastByte = default(int);
+            int offset = default(int);
+
+            //  some gzip header flags
             bool id1 = false;
             bool id2 = false;
-            bool id3 = false;
-            bool extraByte = false;
+            bool compressionFlag = false;
+            bool flag = false;
+            bool extraCompressionFlag = false;
+            bool osByte = false;
 
             while (lastByte != -1)
             {
                 lastByte = stream.ReadByte();
 
                 if (lastByte == 0x1f)
+                {
                     id1 = true;
-                else if (lastByte == 0x8b && id1)
-                    id2 = true;
-                else if (lastByte == 0x08 && id2 && id1)
-                {
-                    id3 = true;
+                    offset++;
                 }
-                else if (lastByte == 0x00 && id3 && id2 && id1)
+                else if (offset == 1 && lastByte == 0x8b && id1)
                 {
-                    extraByte = true;
-                    places.Enqueue(stream.Position - 4);
+                    id2 = true;
+                    offset++;
+                }
+                else if (offset == 2 && lastByte == 0x08 && id2 && id1)
+                {
+                    compressionFlag = true;
+                    offset++;
+                }
+                else if (offset == 3 && (lastByte == 0x00) && compressionFlag && id2 && id1)
+                {
+                    flag = true;
+                    offset++;
+                }
+                else if (offset > 3 && offset < 8 && flag && compressionFlag && id2 && id1)
+                {
+                    offset++;
+                    continue;
+                }
+                else if (offset == 8 && flag && compressionFlag && id2 && id1)
+                {
+                    if (lastByte == 0x04)
+                    {
+                        extraCompressionFlag = true;
+                        offset++;
+                    }
+                    else
+                    {
+                        id1 = false;
+                        id2 = false;
+                        compressionFlag = false;
+                        flag = false;
+                        extraCompressionFlag = false;
+                        osByte = false;
+                        offset = default(int);
+                    }
+                }
+                else if (offset == 9 && extraCompressionFlag && flag && compressionFlag && id2 && id1)
+                {
+                    if (lastByte == 0x00)
+                    {
+                        osByte = true;
+                        indices.Enqueue(stream.Position - 10);
+                    }
 
                     id1 = false;
                     id2 = false;
-                    id3 = false;
-                    extraByte = false;
+                    compressionFlag = false;
+                    flag = false;
+                    extraCompressionFlag = false;
+                    osByte = false;
+                    offset = default(int);
                 }
                 else
                 {
                     id1 = false;
                     id2 = false;
-                    id3 = false;
-                    extraByte = false;
+                    compressionFlag = false;
+                    flag = false;
+                    extraCompressionFlag = false;
+                    osByte = false;
+                    offset = default(int);
                 }
             }
 
             stream.Seek(0, SeekOrigin.Begin);
-            return places;
+            return indices;
         }
 
         public OperationResult DecompressFile(string inputFilePath)
